@@ -5,6 +5,7 @@ set -o nounset
 set -o errexit
 
 img=/images/$1
+extra_script="$4"
 
 echo "HI! I'm going to set SSH access and wifi config in the Raspbian image."
 echo
@@ -90,6 +91,10 @@ else
             # we need this so we can run arm code using chroot
             cp /usr/bin/qemu-arm-static $rootfs/usr/bin
 
+            # mount the necessary stuff to chroot in
+            for f in dev dev/pts sys proc run ; do mount --bind /$f $rootfs/$f ; done
+            mount --bind $bootfs $rootfs/boot/
+
             # Enable ssh access by putting a file named 'ssh' in the boot partition
             chroot $rootfs systemctl enable ssh 2>&1 | egrep -v 'qemu|preload'
 
@@ -102,16 +107,21 @@ else
             # run extra setup script inside qemu arm emulator, so it will run
             # just as if it was running in the raspberry pi
             # use this to install extra software, like docker, jellyfin, etc.
-            touch /root/extra_script
-            cp /root/extra_script $rootfs/root/extra_script
-            if [ "$(cat $rootfs/root/extra_script)" != "" ] ; then
-                echo '==========================================================================================='
-                echo 'run extra script using qemu-static-arm inside the image...'
-                echo '==========================================================================================='
-                chmod a+x $rootfs/root/extra_script
-                chroot $rootfs /root/extra_script 2>&1 | egrep -v 'qemu|preload'
+            if [ "$extra_script" != "" ] ; then
+                cp $extra_script $rootfs/root/extra_script
+                if [ "$(cat $rootfs/root/extra_script)" != "" ] ; then
+                    echo '==========================================================================================='
+                    echo 'run extra script using qemu-static-arm inside the image...'
+                    echo '==========================================================================================='
+                    chmod a+x $rootfs/root/extra_script
+                    chroot $rootfs /bin/bash -c 'apt install -y --force-yes apt-transport-https sudo' 2>&1 | egrep -v 'qemu|preload'
+                    chroot $rootfs /root/extra_script 2>&1 | egrep -v 'qemu|preload'
+                fi
+                /bin/bash
             fi
-            /bin/bash
+
+            # umount chroot stuff
+            for f in dev dev/pts sys proc run ; do umount $rootfs/$f ; done
 
             echo '==========================================================================================='
             echo
